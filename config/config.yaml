@@ -1,0 +1,5 @@
+threshold: 4
+readout_window: 1000
+signal_start: 550
+signal_interval: 400
+baseline_interval: 400
