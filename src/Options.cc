@@ -16,8 +16,9 @@ Options::Options(int argc, char **argv,
   po::options_description generalOptions{"General"};
   generalOptions.add_options()
     ("help,h", "Prints this help message")
-    ("input,i",po::value<std::string>(), "Prints this help message")
-    ("output,o", po::value<std::string>(),"Prints this help message")
+    ("input,i",po::value<std::string>(), "input csv file with datasets")
+    ("output,o", po::value<std::string>(),"output file name")
+    ("dataset,L", po::value<std::string>(),"a single line of dataset")
     ("config,c", po::value<std::string>()->required(),
      "Master configuration file (required)");
   allOptions_.add(generalOptions);

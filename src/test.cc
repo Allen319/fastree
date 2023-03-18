@@ -6,6 +6,7 @@
 #include <vector>
 #include <cmath>
 #include <random>
+#include <memory>
 
 // Include ROOT headers
 #include "TTree.h"
@@ -15,6 +16,10 @@
 #include "ExceptionV.h"
 #include "Logger.h"
 #include "Options.h"
+
+//This function reads the SiPM single waveform (2002 points)
+// and automatically calculate the baseline position as well
+// as the standard deviation corresponding to the baseline choice
 std::pair<float, float> calculateBaselineAndStdDev(const std::vector<float> &SiPMWave, int readoutWindow, float thres) {
     int count = 0;
     float baseline = 0;
@@ -77,49 +82,42 @@ std::pair<float, float> calculateBaselineAndStdDev(const std::vector<float> &SiP
     return {baseline, std_dev};
 }
 
-
-int main(int argc, char **argv) {
-    Options options(argc, argv);
-    YAML::Node const config = options.GetConfig();
+//The function reads information from a line of csv file
+// or just a std::string with csvLine[i] represented for
+// different information of the test
+void readAndFill(const YAML::Node config, std::string csvLine, std::unique_ptr<TTree> tree) {
     int threshold = Options::NodeAs<int>(config, {"threshold"});
     int readoutwindow = Options::NodeAs<int>(config, {"readout_window"});
-    int signalstart = options.NodeAs<int>(config, {"signal_start"});
-    int signalinterval = options.NodeAs<int>(config, {"signal_interval"});
-    int baselineinterval = options.NodeAs<int>(config, {"baseline_interval"});
-
-    //input file name
-    std::string filename;
-    if  (options.Exists("input")) {
-      if (options.GetConfig()["path_prefix"])
-        filename = options.NodeAs<std::string>(config, {"path_prefix"}) + "/" 
-                   + options.GetAs<std::string>("input");
-      else filename = options.GetAs<std::string>("input");
+    int signalstart = Options::NodeAs<int>(config, {"signal_start"});
+    int signalinterval = Options::NodeAs<int>(config, {"signal_interval"});
+    int baselineinterval = Options::NodeAs<int>(config, {"baseline_interval"});
+    std::vector<std::string> elements;
+    std::stringstream ss(csvLine);
+    std::string element;
+    while (std::getline(ss, element, ',')) {
+        elements.push_back(element);
     }
-    //output file name
-    std::string outputName = "output.root";
-    if  (options.Exists("output")) outputName = options.GetAs<std::string>("output");
-    //reading the data file
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        std::cerr << "Unable to open file: " << filename << std::endl;
-        return 1;
-    }
-
-    TFile *file1 = new TFile(outputName.c_str(), "recreate");
-    TTree* tree = new TTree("evt", "evt");
+    LOG_INFO << "Starting to process SiPM No." << elements[0] << " at the voltage " << elements[1];
+    tree.reset(new TTree(("SiPM_" + elements[0] + "_" + elements[1]).c_str(), "events"));
     Float_t sigQ;
     Float_t bkgQ;
     Float_t baselineDev;
     tree->Branch("sigQ", &sigQ, "sigQ/F");
     tree->Branch("bkgQ", &bkgQ, "bkgQ/F");
     tree->Branch("dev", &baselineDev, "dev/F");
-
-
+    std::ifstream file(elements[2]);
+    if (!file.is_open()) {
+        LOG_ERROR << "Unable to open file: " << elements[2] << std::endl;
+        return;
+    }
     std::string line;
 
     std::vector<float> SiPMWave;
 
+    unsigned long countLine = 0;
     while (std::getline(file, line)) {
+        if (countLine % 10000 == 0) LOG_INFO << countLine << " lines have been processed.";
+        countLine += 1;
         std::istringstream iss(line);
         float num;
         while (iss >> num) 
@@ -136,11 +134,47 @@ int main(int argc, char **argv) {
         tree->Fill(); 
         SiPMWave.clear();
     }
+    tree->Write();
+}
 
-    file1->Write();
+
+int main(int argc, char **argv) {
+    Options options(argc, argv);
+    YAML::Node const config = options.GetConfig();
+
+    //output file name
+    std::string outputName = "output.root";
+    if  (options.Exists("output")) outputName = options.GetAs<std::string>("output");
+    TFile *file1 = new TFile(outputName.c_str(), "recreate");
+    std::unique_ptr<TTree> tree_ptr;
+
+    //input file name
+    std::string filename;
+    if  (options.Exists("input")) {
+        if (options.GetConfig()["path_prefix"])
+            filename = options.NodeAs<std::string>(config, {"path_prefix"}) + "/" 
+                       + options.GetAs<std::string>("input");
+        else filename = options.GetAs<std::string>("input");
+
+        std::ifstream infile(filename);
+        if (!infile.is_open()) {
+            LOG_ERROR << "Program abort. Could not open csv file.";
+            std::abort();
+        }
+        std::string line;
+        while (std::getline(infile, line)) {
+            readAndFill(config, line, std::move(tree_ptr)); 
+        }
+    }
+    else if (options.Exists("dataset")) {
+        std::string testLine;
+        testLine = options.GetAs<std::string>("dataset");
+        readAndFill(config, testLine, std::move(tree_ptr));
+    }
+    else
+        LOG_ERROR << "cannot use both input datasets csv file and a single line!";
+
     file1->Close();
-    file.close();
 
     return 0;
 }
-
